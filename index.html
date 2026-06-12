@@ -156,6 +156,7 @@
           <button id="export-btn" class="w-full text-left px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded text-xs">📥 Exportar respaldo (JSON)</button>
           <button id="import-btn" class="w-full text-left px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded text-xs">📤 Importar respaldo</button>
           <input type="file" id="import-file" accept=".json" class="hidden">
+          <button id="compensacion-report-btn" class="w-full text-left px-3 py-2 bg-violet-50 hover:bg-violet-100 text-violet-700 rounded text-xs font-medium">📊 Informe horas compensatorias</button>
           <button id="reset-btn" class="w-full text-left px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-xs">🗑️ Borrar todos los registros</button>
         </div>
       </div>
@@ -209,6 +210,27 @@
   </div>
 </div>
 
+<!-- MODAL INFORME HORAS COMPENSATORIAS -->
+<div id="comp-report-modal" class="hidden fixed inset-0 z-50 modal-backdrop items-center justify-center p-4">
+  <div class="bg-white rounded-lg w-full max-w-3xl max-h-[90vh] flex flex-col">
+    <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
+      <h3 class="font-semibold text-slate-900">Informe de Horas Compensatorias 2026</h3>
+      <div class="flex items-center gap-2">
+        <button id="comp-report-print" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded text-xs font-medium">🖨️ Imprimir</button>
+        <button id="comp-report-close" class="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+      </div>
+    </div>
+    <!-- Filtro por persona -->
+    <div class="px-5 py-3 border-b border-slate-100 flex items-center gap-3 flex-shrink-0">
+      <label class="text-xs font-medium text-slate-600">Filtrar por persona:</label>
+      <select id="comp-report-filter" class="px-2 py-1 border border-slate-300 rounded text-xs bg-white">
+        <option value="">Todos</option>
+      </select>
+    </div>
+    <div id="comp-report-content" class="overflow-y-auto flex-1 p-5 scroll-thin"></div>
+  </div>
+</div>
+
 <!-- MODAL -->
 <div id="modal" class="hidden fixed inset-0 z-50 modal-backdrop items-center justify-center p-4">
   <div class="bg-white rounded-lg w-full max-w-md max-h-[90vh] overflow-y-auto scroll-thin">
@@ -235,6 +257,21 @@
           <option value="otro">Otro</option>
         </select>
       </div>
+      <!-- HORAS COMPENSATORIAS (solo visible cuando tipo = compensacion) -->
+      <div id="hora-fields" class="hidden">
+        <div class="grid grid-cols-2 gap-3 mb-2">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Desde (hora)</label>
+            <input type="time" id="modal-hora-inicio" class="w-full px-3 py-2 border border-slate-300 rounded text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Hasta (hora)</label>
+            <input type="time" id="modal-hora-fin" class="w-full px-3 py-2 border border-slate-300 rounded text-sm">
+          </div>
+        </div>
+        <div id="hora-duracion" class="hidden text-xs font-semibold text-violet-700 bg-violet-50 rounded px-2 py-1"></div>
+      </div>
+
       <div>
         <label class="block text-xs font-medium text-slate-600 mb-1">Reemplazo (opcional)</label>
         <select id="modal-replacement" class="w-full px-3 py-2 border border-slate-300 rounded text-sm bg-white">
@@ -410,6 +447,22 @@ function parseDate(s) {
 }
 
 function getMember(id) { return TEAM.find(m => m.id === id); }
+
+function calcHoras(inicio, fin) {
+  if (!inicio || !fin) return 0;
+  const [h1, m1] = inicio.split(':').map(Number);
+  const [h2, m2] = fin.split(':').map(Number);
+  const mins = (h2 * 60 + m2) - (h1 * 60 + m1);
+  return mins > 0 ? mins / 60 : 0;
+}
+
+function fmtHoras(h) {
+  if (!h || h <= 0) return '—';
+  const horas = Math.floor(h);
+  const mins = Math.round((h - horas) * 60);
+  if (mins === 0) return `${horas}h`;
+  return `${horas}h ${mins}m`;
+}
 
 function getEventsForDate(dateStr) {
   return state.events.filter(e => e.date === dateStr);
@@ -605,6 +658,8 @@ function startFirestoreSync() {
           type: data.type,
           replacementId: data.replacementId || null,
           notes: data.notes || '',
+          horaInicio: data.horaInicio || null,
+          horaFin: data.horaFin || null,
           createdBy: data.createdBy || '',
           lastModifiedBy: data.lastModifiedBy || '',
           lastModifiedAt: data.lastModifiedAt || null,
@@ -647,6 +702,8 @@ async function saveEventToFirestore(eventData) {
     type: eventData.type,
     replacementId: eventData.replacementId || null,
     notes: eventData.notes || '',
+    horaInicio: eventData.type === 'compensacion' ? (eventData.horaInicio || null) : null,
+    horaFin: eventData.type === 'compensacion' ? (eventData.horaFin || null) : null,
     lastModifiedBy: currentUser.email,
     lastModifiedAt: serverTimestamp(),
   };
@@ -767,10 +824,14 @@ function renderCalendar() {
       const m = getMember(ev.memberId);
       const t = TYPES[ev.type];
       const repl = ev.replacementId ? getMember(ev.replacementId) : null;
+      const horasLabel = (ev.type === 'compensacion' && ev.horaInicio && ev.horaFin)
+        ? ` ${ev.horaInicio}-${ev.horaFin}` : '';
+      const horasTip = (ev.type === 'compensacion' && ev.horaInicio && ev.horaFin)
+        ? `\n${ev.horaInicio}–${ev.horaFin} (${fmtHoras(calcHoras(ev.horaInicio, ev.horaFin))})` : '';
       html += `
-        <div class="event-pill ${m.bg} ${m.text} ${m.border} border rounded px-1 py-0.5 mb-0.5 truncate" data-event="${ev.id}" title="${m.name} — ${t.label}${repl ? ' (Reemplaza: '+repl.name+')' : ''}${ev.notes ? '\n'+ev.notes : ''}">
+        <div class="event-pill ${m.bg} ${m.text} ${m.border} border rounded px-1 py-0.5 mb-0.5 truncate" data-event="${ev.id}" title="${m.name} — ${t.label}${horasTip}${repl ? ' (Reemplaza: '+repl.name+')' : ''}${ev.notes ? '\n'+ev.notes : ''}">
           <span class="inline-block w-1.5 h-1.5 rounded-full ${t.color} mr-1"></span>
-          <span class="font-medium">${m.name.split(' ')[0]}</span>
+          <span class="font-medium">${m.name.split(' ')[0]}</span>${horasLabel}
           ${repl ? `<span class="opacity-60"> →${repl.name.split(' ')[0]}</span>` : ''}
         </div>
       `;
@@ -930,7 +991,10 @@ function openModal(eventId, defaultDate) {
     document.getElementById('modal-type').value = ev.type;
     document.getElementById('modal-replacement').value = ev.replacementId || '';
     document.getElementById('modal-notes').value = ev.notes || '';
+    document.getElementById('modal-hora-inicio').value = ev.horaInicio || '';
+    document.getElementById('modal-hora-fin').value = ev.horaFin || '';
     document.getElementById('modal-delete').classList.remove('hidden');
+    toggleHoraFields(ev.type);
   } else {
     state.editingId = null;
     document.getElementById('modal-title').textContent = 'Registrar ausencia';
@@ -941,7 +1005,10 @@ function openModal(eventId, defaultDate) {
     document.getElementById('modal-type').value = 'feriado';
     document.getElementById('modal-replacement').value = '';
     document.getElementById('modal-notes').value = '';
+    document.getElementById('modal-hora-inicio').value = '';
+    document.getElementById('modal-hora-fin').value = '';
     document.getElementById('modal-delete').classList.add('hidden');
+    toggleHoraFields('feriado');
   }
 
   checkModalConflict();
@@ -1001,6 +1068,8 @@ async function saveEvent() {
   const type = document.getElementById('modal-type').value;
   const replacementId = document.getElementById('modal-replacement').value || null;
   const notes = document.getElementById('modal-notes').value.trim();
+  const horaInicio = type === 'compensacion' ? document.getElementById('modal-hora-inicio').value || null : null;
+  const horaFin = type === 'compensacion' ? document.getElementById('modal-hora-fin').value || null : null;
 
   if (!date || !memberId) {
     showToast('Completa fecha y persona', true);
@@ -1012,10 +1081,15 @@ async function saveEvent() {
     return;
   }
 
+  if (type === 'compensacion' && horaInicio && horaFin && calcHoras(horaInicio, horaFin) <= 0) {
+    showToast('La hora de término debe ser posterior a la de inicio', true);
+    return;
+  }
+
   try {
     const eventData = {
       id: state.editingId || null,
-      date, memberId, type, replacementId, notes
+      date, memberId, type, replacementId, notes, horaInicio, horaFin
     };
     await saveEventToFirestore(eventData);
     showToast(state.editingId ? '✓ Ausencia actualizada' : '✓ Ausencia registrada');
@@ -1100,6 +1174,142 @@ async function resetData() {
   }
 }
 
+// ============== HORA FIELDS TOGGLE ==============
+function toggleHoraFields(type) {
+  const fields = document.getElementById('hora-fields');
+  if (type === 'compensacion') {
+    fields.classList.remove('hidden');
+  } else {
+    fields.classList.add('hidden');
+  }
+  updateHoraDuracion();
+}
+
+function updateHoraDuracion() {
+  const inicio = document.getElementById('modal-hora-inicio').value;
+  const fin = document.getElementById('modal-hora-fin').value;
+  const el = document.getElementById('hora-duracion');
+  if (inicio && fin) {
+    const h = calcHoras(inicio, fin);
+    if (h > 0) {
+      el.textContent = `⏱ Duración: ${fmtHoras(h)}`;
+      el.classList.remove('hidden');
+    } else {
+      el.textContent = '⚠ La hora de término debe ser posterior a la de inicio';
+      el.classList.remove('hidden');
+    }
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+// ============== COMPENSATION REPORT ==============
+function openCompensacionReport() {
+  const modal = document.getElementById('comp-report-modal');
+  // Populate filter
+  const filter = document.getElementById('comp-report-filter');
+  filter.innerHTML = '<option value="">Todos</option>' +
+    TEAM.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  renderCompensacionReport('');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeCompensacionReport() {
+  document.getElementById('comp-report-modal').classList.add('hidden');
+  document.getElementById('comp-report-modal').classList.remove('flex');
+}
+
+function renderCompensacionReport(filterMemberId) {
+  const container = document.getElementById('comp-report-content');
+  const events = state.events.filter(e =>
+    e.type === 'compensacion' &&
+    (!filterMemberId || e.memberId === filterMemberId)
+  );
+
+  if (events.length === 0) {
+    container.innerHTML = `<p class="text-sm text-slate-400 text-center py-8">No hay registros de compensación${filterMemberId ? ' para esta persona' : ''}.</p>`;
+    return;
+  }
+
+  // Agrupar por persona → mes
+  const byMember = {};
+  events.forEach(ev => {
+    if (!byMember[ev.memberId]) byMember[ev.memberId] = {};
+    const monthKey = ev.date.slice(0, 7);
+    if (!byMember[ev.memberId][monthKey]) byMember[ev.memberId][monthKey] = [];
+    byMember[ev.memberId][monthKey].push(ev);
+  });
+
+  let html = '';
+  const membersToShow = filterMemberId
+    ? TEAM.filter(m => m.id === filterMemberId)
+    : TEAM.filter(m => byMember[m.id]);
+
+  membersToShow.forEach(member => {
+    if (!byMember[member.id]) return;
+    let totalPersona = 0;
+    html += `<div class="mb-6">`;
+    html += `<div class="flex items-center gap-2 mb-3 pb-2 border-b-2 border-slate-200">
+      <span class="w-3 h-3 rounded-full ${member.color} flex-shrink-0"></span>
+      <h4 class="font-bold text-slate-800">${member.name}</h4>
+    </div>`;
+
+    const months = Object.keys(byMember[member.id]).sort();
+    months.forEach(monthKey => {
+      const [y, m] = monthKey.split('-').map(Number);
+      const monthEvs = byMember[member.id][monthKey].sort((a, b) => a.date.localeCompare(b.date));
+      let totalMes = 0;
+      monthEvs.forEach(ev => { totalMes += calcHoras(ev.horaInicio, ev.horaFin); });
+      totalPersona += totalMes;
+
+      html += `<div class="mb-3">`;
+      html += `<div class="flex items-center justify-between mb-1">
+        <span class="text-xs font-semibold text-slate-600 uppercase tracking-wide">${MONTHS[m-1]} ${y}</span>
+        <span class="text-xs font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded">${fmtHoras(totalMes)}</span>
+      </div>`;
+      html += `<table class="w-full text-xs border-collapse">`;
+      html += `<thead><tr class="bg-slate-50">
+        <th class="text-left px-2 py-1.5 text-slate-500 font-medium border border-slate-200">Fecha</th>
+        <th class="text-left px-2 py-1.5 text-slate-500 font-medium border border-slate-200">Desde</th>
+        <th class="text-left px-2 py-1.5 text-slate-500 font-medium border border-slate-200">Hasta</th>
+        <th class="text-right px-2 py-1.5 text-slate-500 font-medium border border-slate-200">Horas</th>
+        <th class="text-left px-2 py-1.5 text-slate-500 font-medium border border-slate-200">Notas</th>
+      </tr></thead><tbody>`;
+      monthEvs.forEach(ev => {
+        const d = parseDate(ev.date);
+        const dateLabel = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+        const horas = calcHoras(ev.horaInicio, ev.horaFin);
+        html += `<tr class="hover:bg-slate-50 cursor-pointer" data-event="${ev.id}">
+          <td class="px-2 py-1.5 border border-slate-200">${dateLabel}</td>
+          <td class="px-2 py-1.5 border border-slate-200">${ev.horaInicio || '—'}</td>
+          <td class="px-2 py-1.5 border border-slate-200">${ev.horaFin || '—'}</td>
+          <td class="px-2 py-1.5 border border-slate-200 text-right font-semibold text-violet-700">${fmtHoras(horas)}</td>
+          <td class="px-2 py-1.5 border border-slate-200 text-slate-500">${ev.notes || ''}</td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    });
+
+    html += `<div class="flex justify-end mt-1 mb-2">
+      <span class="text-sm font-bold text-white bg-violet-600 px-3 py-1 rounded">
+        Total ${member.name.split(' ')[0]}: ${fmtHoras(totalPersona)}
+      </span>
+    </div>`;
+    html += `</div>`;
+  });
+
+  container.innerHTML = html;
+
+  // Permitir editar desde el informe
+  container.querySelectorAll('[data-event]').forEach(el => {
+    el.addEventListener('click', () => {
+      closeCompensacionReport();
+      openModal(el.dataset.event);
+    });
+  });
+}
+
 // ============== EVENT LISTENERS ==============
 document.getElementById('prev-month').addEventListener('click', () => {
   state.currentMonth = Math.max(0, state.currentMonth - 1);
@@ -1132,6 +1342,50 @@ document.getElementById('filter-clear').addEventListener('click', () => {
   renderCalendar();
 });
 
+// Horas compensatorias
+document.getElementById('modal-type').addEventListener('change', e => {
+  toggleHoraFields(e.target.value);
+  checkModalConflict();
+});
+document.getElementById('modal-hora-inicio').addEventListener('change', updateHoraDuracion);
+document.getElementById('modal-hora-fin').addEventListener('change', updateHoraDuracion);
+
+// Informe compensación
+document.getElementById('compensacion-report-btn').addEventListener('click', openCompensacionReport);
+document.getElementById('comp-report-close').addEventListener('click', closeCompensacionReport);
+document.getElementById('comp-report-modal').addEventListener('click', e => {
+  if (e.target.id === 'comp-report-modal') closeCompensacionReport();
+});
+document.getElementById('comp-report-filter').addEventListener('change', e => {
+  renderCompensacionReport(e.target.value);
+});
+document.getElementById('comp-report-print').addEventListener('click', () => {
+  const content = document.getElementById('comp-report-content').innerHTML;
+  const filterName = document.getElementById('comp-report-filter').selectedOptions[0].text;
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Informe Horas Compensatorias 2026</title>
+    <style>
+      body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; padding: 20px; }
+      h2 { font-size: 16px; margin-bottom: 4px; }
+      .sub { font-size: 10px; color: #64748b; margin-bottom: 16px; }
+      h4 { font-size: 12px; margin: 12px 0 4px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+      th, td { border: 1px solid #cbd5e1; padding: 3px 6px; text-align: left; }
+      th { background: #f1f5f9; font-weight: 600; }
+      .total-mes { text-align: right; font-weight: bold; color: #7c3aed; background: #f5f3ff; }
+      .total-persona { text-align: right; font-size: 12px; font-weight: bold; background: #7c3aed; color: white; padding: 4px 8px; }
+      @page { margin: 1.5cm; }
+    </style>
+    </head><body>
+    <h2>Informe de Horas Compensatorias 2026</h2>
+    <p class="sub">Subdepartamento de Finanzas — SLEP Petorca${filterName !== 'Todos' ? ' · ' + filterName : ''} · Generado: ${new Date().toLocaleDateString('es-CL')}</p>
+    ${content}
+    </body></html>`);
+  w.document.close();
+  w.print();
+});
+
 document.getElementById('modal-close').addEventListener('click', closeModal);
 document.getElementById('modal-cancel').addEventListener('click', closeModal);
 document.getElementById('modal-save').addEventListener('click', saveEvent);
@@ -1139,6 +1393,7 @@ document.getElementById('modal-delete').addEventListener('click', deleteEvent);
 ['modal-date','modal-member','modal-replacement'].forEach(id => {
   document.getElementById(id).addEventListener('change', checkModalConflict);
 });
+// Nota: modal-type tiene su propio listener arriba (toggleHoraFields + checkModalConflict)
 document.getElementById('modal').addEventListener('click', e => {
   if (e.target.id === 'modal') closeModal();
 });
