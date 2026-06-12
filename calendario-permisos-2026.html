@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calendario de Permisos 2026 - Finanzas SLEP Petorca</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .day-cell { min-height: 90px; transition: all 0.15s; }
+  .day-cell:hover { background-color: #f8fafc; cursor: pointer; }
+  .event-pill { font-size: 10px; line-height: 1.1; }
+  .conflict-cell { background-color: #fef2f2 !important; }
+  .holiday-cell { background-color: #fafaf9; }
+  .today-cell { box-shadow: inset 0 0 0 2px #2563eb; }
+  .modal-backdrop { background-color: rgba(15, 23, 42, 0.6); }
+  .print-only { display: none; }
+  .print-list-view { display: none; }
+  @media print {
+    @page { margin: 1.2cm; size: landscape; }
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+    .day-cell { min-height: 70px; break-inside: avoid; }
+    body { background: white !important; }
+    /* Calendar print: hide list, show calendar */
+    body:not(.print-list-mode) .print-list-view { display: none !important; }
+    body:not(.print-list-mode) .screen-calendar { display: block !important; }
+    /* List print: hide calendar, show list */
+    body.print-list-mode .screen-calendar { display: none !important; }
+    body.print-list-mode .print-list-view { display: block !important; }
+    body.print-list-mode @page { size: portrait; }
+    .print-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .print-table th, .print-table td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; vertical-align: top; }
+    .print-table th { background: #f1f5f9; font-weight: 600; }
+    .print-month-section { break-inside: avoid; page-break-inside: avoid; margin-bottom: 16px; }
+    .print-month-section h3 { font-size: 13px; font-weight: 700; background: #1e293b; color: white; padding: 4px 8px; margin: 0 0 4px; }
+  }
+  .scroll-thin::-webkit-scrollbar { width: 6px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<div id="app" class="min-h-screen">
+
+  <!-- HEADER -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 no-print">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <h1 class="text-xl font-bold text-slate-900">Calendario de Permisos 2026</h1>
+        <p class="text-xs text-slate-500">Subdepartamento de Finanzas — SLEP Petorca</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="prev-month" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-sm font-medium">←</button>
+        <h2 id="current-month" class="text-base font-semibold w-40 text-center"></h2>
+        <button id="next-month" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-sm font-medium">→</button>
+        <button id="today-btn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium ml-2">Hoy</button>
+        <button id="print-cal-btn" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-sm font-medium ml-2">🖨️ Calendario</button>
+        <button id="print-list-btn" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-sm font-medium">📋 Lista anual</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-7xl mx-auto px-4 py-4 grid grid-cols-1 lg:grid-cols-4 gap-4">
+
+    <!-- SIDEBAR -->
+    <aside class="lg:col-span-1 space-y-4 no-print">
+
+      <!-- TEAM -->
+      <div class="bg-white rounded-lg border border-slate-200 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-sm text-slate-700">Equipo</h3>
+          <button id="filter-clear" class="text-xs text-blue-600 hover:underline">Ver todos</button>
+        </div>
+        <div id="team-list" class="space-y-1.5"></div>
+      </div>
+
+      <!-- LEGEND -->
+      <div class="bg-white rounded-lg border border-slate-200 p-4">
+        <h3 class="font-semibold text-sm text-slate-700 mb-3">Tipos de ausencia</h3>
+        <div class="space-y-1.5 text-xs">
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-emerald-500"></span><span>Feriado Legal</span></div>
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-sky-500"></span><span>Permiso Administrativo</span></div>
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-amber-500"></span><span>Licencia Médica</span></div>
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-violet-500"></span><span>Compensación</span></div>
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-slate-400"></span><span>Otro</span></div>
+          <div class="flex items-center gap-2 pt-2 border-t border-slate-100"><span class="w-3 h-3 rounded bg-red-100 border border-red-300"></span><span>Conflicto (2+ ausentes)</span></div>
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded bg-stone-100 border border-stone-300"></span><span>Feriado nacional</span></div>
+        </div>
+      </div>
+
+      <!-- SUMMARY -->
+      <div class="bg-white rounded-lg border border-slate-200 p-4">
+        <h3 class="font-semibold text-sm text-slate-700 mb-3">Resumen por persona <span class="text-xs text-slate-400 font-normal">(2026)</span></h3>
+        <div id="summary-list" class="space-y-2 text-xs"></div>
+      </div>
+
+      <!-- ACTIONS -->
+      <div class="bg-white rounded-lg border border-slate-200 p-4">
+        <h3 class="font-semibold text-sm text-slate-700 mb-3">Acciones</h3>
+        <div class="space-y-2">
+          <button id="export-btn" class="w-full text-left px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded text-xs">📥 Exportar respaldo (JSON)</button>
+          <button id="import-btn" class="w-full text-left px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded text-xs">📤 Importar respaldo</button>
+          <input type="file" id="import-file" accept=".json" class="hidden">
+          <button id="reset-btn" class="w-full text-left px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-xs">🗑️ Borrar todos los registros</button>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- MAIN CALENDAR -->
+    <main class="lg:col-span-3">
+
+      <!-- PRINT HEADER (solo visible al imprimir) -->
+      <div class="print-only mb-4">
+        <div class="text-center border-b-2 border-slate-800 pb-2 mb-3">
+          <h1 id="print-title" class="text-2xl font-bold text-slate-900">Mes Año</h1>
+          <p class="text-sm text-slate-700 mt-1">Calendario de Permisos y Feriados Legales</p>
+          <p class="text-xs text-slate-600">Subdepartamento de Finanzas — Servicio Local de Educación Pública de Petorca</p>
+          <p id="print-date" class="text-[10px] text-slate-500 mt-1">Generado: —</p>
+        </div>
+      </div>
+
+      <!-- LIST VIEW (solo visible al imprimir en modo lista) -->
+      <div class="print-list-view">
+        <div class="text-center border-b-2 border-slate-800 pb-2 mb-4">
+          <h1 class="text-2xl font-bold text-slate-900">Listado Anual de Ausencias 2026</h1>
+          <p class="text-sm text-slate-700 mt-1">Permisos, Feriados Legales y Licencias por mes</p>
+          <p class="text-xs text-slate-600">Subdepartamento de Finanzas — Servicio Local de Educación Pública de Petorca</p>
+          <p id="print-list-date" class="text-[10px] text-slate-500 mt-1">Generado: —</p>
+        </div>
+        <div id="print-list-content"></div>
+      </div>
+
+      <div class="screen-calendar bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <div class="grid grid-cols-7 bg-slate-100 border-b border-slate-200">
+          <div class="text-center text-xs font-semibold text-slate-600 py-2">Lun</div>
+          <div class="text-center text-xs font-semibold text-slate-600 py-2">Mar</div>
+          <div class="text-center text-xs font-semibold text-slate-600 py-2">Mié</div>
+          <div class="text-center text-xs font-semibold text-slate-600 py-2">Jue</div>
+          <div class="text-center text-xs font-semibold text-slate-600 py-2">Vie</div>
+          <div class="text-center text-xs font-semibold text-slate-500 py-2">Sáb</div>
+          <div class="text-center text-xs font-semibold text-slate-500 py-2">Dom</div>
+        </div>
+        <div id="calendar-grid" class="grid grid-cols-7"></div>
+      </div>
+
+      <!-- UPCOMING -->
+      <div class="mt-4 bg-white rounded-lg border border-slate-200 p-4 no-print">
+        <h3 class="font-semibold text-sm text-slate-700 mb-3">Próximas ausencias <span class="text-xs text-slate-400 font-normal">(siguientes 30 días)</span></h3>
+        <div id="upcoming-list" class="space-y-2"></div>
+      </div>
+    </main>
+
+  </div>
+</div>
+
+<!-- MODAL -->
+<div id="modal" class="hidden fixed inset-0 z-50 modal-backdrop items-center justify-center p-4">
+  <div class="bg-white rounded-lg w-full max-w-md max-h-[90vh] overflow-y-auto scroll-thin">
+    <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+      <h3 id="modal-title" class="font-semibold text-slate-900">Registrar ausencia</h3>
+      <button id="modal-close" class="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+    </div>
+    <div class="p-5 space-y-4">
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Fecha</label>
+        <input type="date" id="modal-date" class="w-full px-3 py-2 border border-slate-300 rounded text-sm">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Persona</label>
+        <select id="modal-member" class="w-full px-3 py-2 border border-slate-300 rounded text-sm bg-white"></select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Tipo de ausencia</label>
+        <select id="modal-type" class="w-full px-3 py-2 border border-slate-300 rounded text-sm bg-white">
+          <option value="feriado">Feriado Legal</option>
+          <option value="permiso">Permiso Administrativo</option>
+          <option value="licencia">Licencia Médica</option>
+          <option value="compensacion">Compensación</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Reemplazo (opcional)</label>
+        <select id="modal-replacement" class="w-full px-3 py-2 border border-slate-300 rounded text-sm bg-white">
+          <option value="">— Sin reemplazo asignado —</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Notas (opcional)</label>
+        <textarea id="modal-notes" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded text-sm" placeholder="Ej: medio día, tarea pendiente, etc."></textarea>
+      </div>
+      <div id="modal-conflict" class="hidden bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded p-2"></div>
+    </div>
+    <div class="px-5 py-3 border-t border-slate-200 flex items-center justify-between gap-2">
+      <button id="modal-delete" class="hidden px-3 py-2 text-rose-600 hover:bg-rose-50 rounded text-sm font-medium">Eliminar</button>
+      <div class="flex gap-2 ml-auto">
+        <button id="modal-cancel" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded text-sm font-medium">Cancelar</button>
+        <button id="modal-save" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="hidden fixed bottom-4 right-4 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg text-sm z-50"></div>
+
+<script>
+// ============== CONFIG ==============
+const YEAR = 2026;
+const STORAGE_KEY = 'permisos-finanzas-petorca-2026';
+
+const TEAM = [
+  { id: 'wilson',     name: 'Wilson Rojas',          color: 'bg-blue-500',   text: 'text-blue-700',   bg: 'bg-blue-50',   border: 'border-blue-200' },
+  { id: 'juanpablo',  name: 'Juan Pablo Bustamante', color: 'bg-emerald-500',text: 'text-emerald-700',bg: 'bg-emerald-50',border: 'border-emerald-200' },
+  { id: 'benedicto',  name: 'Benedicto Quintana',    color: 'bg-purple-500', text: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200' },
+  { id: 'sebastian',  name: 'Sebastian Olguin',      color: 'bg-orange-500', text: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-200' },
+  { id: 'fernando',   name: 'Fernando Saavedra',     color: 'bg-rose-500',   text: 'text-rose-700',   bg: 'bg-rose-50',   border: 'border-rose-200' },
+  { id: 'yessenia',   name: 'Yessenia Vilches',      color: 'bg-teal-500',   text: 'text-teal-700',   bg: 'bg-teal-50',   border: 'border-teal-200' },
+  { id: 'catalina',   name: 'Catalina Brito',        color: 'bg-amber-500',  text: 'text-amber-700',  bg: 'bg-amber-50',  border: 'border-amber-200' },
+];
+
+const TYPES = {
+  feriado:      { label: 'Feriado Legal',          color: 'bg-emerald-500', short: 'F. Legal' },
+  permiso:      { label: 'Permiso Administrativo', color: 'bg-sky-500',     short: 'Permiso'  },
+  licencia:     { label: 'Licencia Médica',        color: 'bg-amber-500',   short: 'Licencia' },
+  compensacion: { label: 'Compensación',           color: 'bg-violet-500',  short: 'Compens.' },
+  otro:         { label: 'Otro',                   color: 'bg-slate-400',   short: 'Otro'     },
+};
+
+// Feriados nacionales Chile 2026
+const HOLIDAYS_2026 = {
+  '2026-01-01': 'Año Nuevo',
+  '2026-04-03': 'Viernes Santo',
+  '2026-04-04': 'Sábado Santo',
+  '2026-05-01': 'Día del Trabajador',
+  '2026-05-21': 'Glorias Navales',
+  '2026-06-21': 'Día de los Pueblos Indígenas',
+  '2026-06-29': 'San Pedro y San Pablo',
+  '2026-07-16': 'Virgen del Carmen',
+  '2026-08-15': 'Asunción de la Virgen',
+  '2026-09-18': 'Independencia Nacional',
+  '2026-09-19': 'Glorias del Ejército',
+  '2026-10-12': 'Encuentro de Dos Mundos',
+  '2026-10-31': 'Iglesias Evangélicas',
+  '2026-11-01': 'Todos los Santos',
+  '2026-12-08': 'Inmaculada Concepción',
+  '2026-12-25': 'Navidad',
+};
+
+const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+// ============== STATE ==============
+let state = {
+  events: [],   // { id, memberId, date (YYYY-MM-DD), type, replacementId, notes }
+  filter: null, // memberId or null
+  currentMonth: 0,
+  editingId: null,
+};
+
+// ============== STORAGE ==============
+async function loadState() {
+  try {
+    const r = await window.storage.get(STORAGE_KEY);
+    if (r && r.value) {
+      const data = JSON.parse(r.value);
+      state.events = data.events || [];
+    }
+  } catch (e) {
+    state.events = [];
+  }
+  // Set current month to today's month if in 2026, else January
+  const now = new Date();
+  state.currentMonth = (now.getFullYear() === YEAR) ? now.getMonth() : 0;
+}
+
+async function saveState() {
+  try {
+    await window.storage.set(STORAGE_KEY, JSON.stringify({ events: state.events }));
+  } catch (e) {
+    showToast('⚠️ No se pudo guardar', true);
+  }
+}
+
+// ============== HELPERS ==============
+function fmtDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+function parseDate(s) {
+  const [y,m,d] = s.split('-').map(Number);
+  return new Date(y, m-1, d);
+}
+
+function getMember(id) { return TEAM.find(m => m.id === id); }
+
+function getEventsForDate(dateStr) {
+  return state.events.filter(e => e.date === dateStr);
+}
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `fixed bottom-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm z-50 ${isError ? 'bg-rose-600' : 'bg-slate-900'} text-white`;
+  setTimeout(() => t.classList.add('hidden'), 2500);
+  t.classList.remove('hidden');
+}
+
+// ============== RENDER ==============
+function renderTeamList() {
+  const c = document.getElementById('team-list');
+  c.innerHTML = TEAM.map(m => {
+    const active = state.filter === m.id;
+    return `
+      <button data-member="${m.id}" class="team-btn w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-xs ${active ? m.bg + ' ' + m.text + ' font-semibold' : 'hover:bg-slate-50'}">
+        <span class="w-3 h-3 rounded-full ${m.color} flex-shrink-0"></span>
+        <span class="truncate">${m.name}</span>
+      </button>
+    `;
+  }).join('');
+  c.querySelectorAll('.team-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.member;
+      state.filter = state.filter === id ? null : id;
+      renderTeamList();
+      renderCalendar();
+    });
+  });
+}
+
+function renderSummary() {
+  const c = document.getElementById('summary-list');
+  c.innerHTML = TEAM.map(m => {
+    const events = state.events.filter(e => e.memberId === m.id);
+    const counts = {};
+    events.forEach(e => { counts[e.type] = (counts[e.type]||0) + 1; });
+    const total = events.length;
+    const detail = Object.entries(counts).map(([t,n]) => `${TYPES[t].short}: ${n}`).join(' · ') || 'Sin registros';
+    return `
+      <div class="flex items-start gap-2">
+        <span class="w-2 h-2 rounded-full ${m.color} mt-1.5 flex-shrink-0"></span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between">
+            <span class="font-medium text-slate-700 truncate">${m.name.split(' ')[0]} ${m.name.split(' ')[1]||''}</span>
+            <span class="text-slate-500 ml-2">${total}d</span>
+          </div>
+          <div class="text-slate-400 text-[10px] truncate">${detail}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCalendar() {
+  const month = state.currentMonth;
+  document.getElementById('current-month').textContent = `${MONTHS[month]} ${YEAR}`;
+  // Actualizar título visible al imprimir
+  const printTitle = document.getElementById('print-title');
+  if (printTitle) printTitle.textContent = `${MONTHS[month]} ${YEAR}`;
+  const printDate = document.getElementById('print-date');
+  if (printDate) {
+    const now = new Date();
+    printDate.textContent = `Generado: ${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()}`;
+  }
+
+  const firstDay = new Date(YEAR, month, 1);
+  const lastDay = new Date(YEAR, month+1, 0);
+  // ISO weekday: Mon=0
+  let startOffset = (firstDay.getDay() + 6) % 7;
+  const daysInMonth = lastDay.getDate();
+  const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+  const today = fmtDate(new Date());
+  const grid = document.getElementById('calendar-grid');
+  let html = '';
+
+  for (let i = 0; i < totalCells; i++) {
+    const dayNum = i - startOffset + 1;
+    if (dayNum < 1 || dayNum > daysInMonth) {
+      html += `<div class="day-cell border-b border-r border-slate-200 bg-slate-50/50"></div>`;
+      continue;
+    }
+    const date = new Date(YEAR, month, dayNum);
+    const dateStr = fmtDate(date);
+    const events = getEventsForDate(dateStr).filter(e => !state.filter || e.memberId === state.filter || e.replacementId === state.filter);
+    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+    const holiday = HOLIDAYS_2026[dateStr];
+    const isToday = dateStr === today;
+    const hasConflict = getEventsForDate(dateStr).filter(e => e.type !== 'compensacion').length >= 2;
+
+    let cellClass = 'day-cell border-b border-r border-slate-200 p-1.5 relative';
+    if (hasConflict) cellClass += ' conflict-cell';
+    else if (holiday) cellClass += ' holiday-cell';
+    else if (isWeekend) cellClass += ' bg-slate-50/40';
+    if (isToday) cellClass += ' today-cell';
+
+    html += `<div class="${cellClass}" data-date="${dateStr}">`;
+    html += `<div class="flex items-start justify-between mb-1">`;
+    html += `<span class="text-xs font-semibold ${isToday ? 'text-blue-700' : isWeekend ? 'text-slate-400' : 'text-slate-700'}">${dayNum}</span>`;
+    if (hasConflict) html += `<span class="text-[9px] text-red-600 font-bold">⚠</span>`;
+    html += `</div>`;
+    if (holiday) {
+      html += `<div class="text-[9px] text-stone-600 italic mb-1 leading-tight">${holiday}</div>`;
+    }
+    events.forEach(ev => {
+      const m = getMember(ev.memberId);
+      const t = TYPES[ev.type];
+      const repl = ev.replacementId ? getMember(ev.replacementId) : null;
+      html += `
+        <div class="event-pill ${m.bg} ${m.text} ${m.border} border rounded px-1 py-0.5 mb-0.5 truncate" data-event="${ev.id}" title="${m.name} — ${t.label}${repl ? ' (Reemplaza: '+repl.name+')' : ''}${ev.notes ? '\n'+ev.notes : ''}">
+          <span class="inline-block w-1.5 h-1.5 rounded-full ${t.color} mr-1"></span>
+          <span class="font-medium">${m.name.split(' ')[0]}</span>
+          ${repl ? `<span class="opacity-60"> →${repl.name.split(' ')[0]}</span>` : ''}
+        </div>
+      `;
+    });
+    html += `</div>`;
+  }
+  grid.innerHTML = html;
+
+  grid.querySelectorAll('.day-cell[data-date]').forEach(cell => {
+    cell.addEventListener('click', e => {
+      const eventEl = e.target.closest('[data-event]');
+      if (eventEl) {
+        openModal(eventEl.dataset.event);
+      } else {
+        openModal(null, cell.dataset.date);
+      }
+    });
+  });
+}
+
+function renderUpcoming() {
+  const c = document.getElementById('upcoming-list');
+  const today = new Date();
+  const in30 = new Date();
+  in30.setDate(today.getDate() + 30);
+  const upcoming = state.events
+    .filter(e => {
+      const d = parseDate(e.date);
+      return d >= today && d <= in30;
+    })
+    .sort((a,b) => a.date.localeCompare(b.date));
+
+  if (upcoming.length === 0) {
+    c.innerHTML = `<p class="text-xs text-slate-400">No hay ausencias programadas en los próximos 30 días.</p>`;
+    return;
+  }
+
+  c.innerHTML = upcoming.map(ev => {
+    const m = getMember(ev.memberId);
+    const t = TYPES[ev.type];
+    const repl = ev.replacementId ? getMember(ev.replacementId) : null;
+    const d = parseDate(ev.date);
+    const dateLabel = `${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3).toLowerCase()}.`;
+    return `
+      <div class="flex items-center gap-3 text-xs py-1.5 border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" data-event="${ev.id}">
+        <span class="w-12 text-slate-500 font-medium">${dateLabel}</span>
+        <span class="w-2 h-2 rounded-full ${m.color} flex-shrink-0"></span>
+        <span class="font-medium text-slate-700 flex-1 truncate">${m.name}</span>
+        <span class="${t.color} text-white px-1.5 py-0.5 rounded text-[10px]">${t.short}</span>
+        ${repl ? `<span class="text-slate-500 text-[10px]">↺ ${repl.name.split(' ')[0]}</span>` : `<span class="text-amber-600 text-[10px]">sin reemplazo</span>`}
+      </div>
+    `;
+  }).join('');
+
+  c.querySelectorAll('[data-event]').forEach(el => {
+    el.addEventListener('click', () => openModal(el.dataset.event));
+  });
+}
+
+function renderAll() {
+  renderTeamList();
+  renderSummary();
+  renderCalendar();
+  renderUpcoming();
+  renderPrintList();
+}
+
+function renderPrintList() {
+  const container = document.getElementById('print-list-content');
+  if (!container) return;
+
+  // Actualizar fecha de generación
+  const printListDate = document.getElementById('print-list-date');
+  if (printListDate) {
+    const now = new Date();
+    printListDate.textContent = `Generado: ${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()}`;
+  }
+
+  // Combinar eventos del equipo + feriados nacionales, ordenar cronológicamente
+  const allRows = [];
+  state.events.forEach(ev => {
+    allRows.push({ date: ev.date, kind: 'event', event: ev });
+  });
+  Object.entries(HOLIDAYS_2026).forEach(([date, name]) => {
+    allRows.push({ date, kind: 'holiday', name });
+  });
+  allRows.sort((a,b) => a.date.localeCompare(b.date));
+
+  // Agrupar por mes
+  const byMonth = {};
+  allRows.forEach(row => {
+    const m = row.date.slice(0,7); // YYYY-MM
+    if (!byMonth[m]) byMonth[m] = [];
+    byMonth[m].push(row);
+  });
+
+  // Construir HTML — un section por mes (incluso vacíos para tener vista completa anual)
+  const DAYS_ES = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  let html = '';
+
+  for (let m = 0; m < 12; m++) {
+    const monthKey = `${YEAR}-${String(m+1).padStart(2,'0')}`;
+    const rows = byMonth[monthKey] || [];
+    html += `<div class="print-month-section">`;
+    html += `<h3>${MONTHS[m].toUpperCase()} ${YEAR}</h3>`;
+    if (rows.length === 0) {
+      html += `<p style="font-size:11px;color:#64748b;font-style:italic;padding:4px 8px;">Sin registros este mes.</p>`;
+    } else {
+      html += `<table class="print-table">`;
+      html += `<thead><tr><th style="width:70px">Fecha</th><th style="width:75px">Día</th><th style="width:140px">Persona</th><th style="width:120px">Tipo</th><th style="width:140px">Reemplazo</th><th>Notas</th></tr></thead>`;
+      html += `<tbody>`;
+      rows.forEach(row => {
+        const d = parseDate(row.date);
+        const dateLabel = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+        const dayLabel = DAYS_ES[d.getDay()];
+        if (row.kind === 'holiday') {
+          html += `<tr style="background:#fef3c7;font-style:italic;">
+            <td>${dateLabel}</td>
+            <td>${dayLabel}</td>
+            <td colspan="4"><strong>FERIADO NACIONAL:</strong> ${row.name}</td>
+          </tr>`;
+        } else {
+          const ev = row.event;
+          const member = getMember(ev.memberId);
+          const type = TYPES[ev.type];
+          const repl = ev.replacementId ? getMember(ev.replacementId) : null;
+          html += `<tr>
+            <td>${dateLabel}</td>
+            <td>${dayLabel}</td>
+            <td><strong>${member.name}</strong></td>
+            <td>${type.label}</td>
+            <td>${repl ? repl.name : '<span style="color:#b45309;">— sin asignar —</span>'}</td>
+            <td>${ev.notes ? ev.notes.replace(/</g,'&lt;') : ''}</td>
+          </tr>`;
+        }
+      });
+      html += `</tbody></table>`;
+    }
+    html += `</div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+// ============== MODAL ==============
+function openModal(eventId, defaultDate) {
+  const modal = document.getElementById('modal');
+  const memberSel = document.getElementById('modal-member');
+  const replSel = document.getElementById('modal-replacement');
+
+  memberSel.innerHTML = TEAM.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+  replSel.innerHTML = '<option value="">— Sin reemplazo asignado —</option>' + TEAM.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+
+  if (eventId) {
+    const ev = state.events.find(e => e.id === eventId);
+    if (!ev) return;
+    state.editingId = eventId;
+    document.getElementById('modal-title').textContent = 'Editar ausencia';
+    document.getElementById('modal-date').value = ev.date;
+    document.getElementById('modal-member').value = ev.memberId;
+    document.getElementById('modal-type').value = ev.type;
+    document.getElementById('modal-replacement').value = ev.replacementId || '';
+    document.getElementById('modal-notes').value = ev.notes || '';
+    document.getElementById('modal-delete').classList.remove('hidden');
+  } else {
+    state.editingId = null;
+    document.getElementById('modal-title').textContent = 'Registrar ausencia';
+    document.getElementById('modal-date').value = defaultDate || fmtDate(new Date());
+    document.getElementById('modal-member').value = TEAM[0].id;
+    document.getElementById('modal-type').value = 'feriado';
+    document.getElementById('modal-replacement').value = '';
+    document.getElementById('modal-notes').value = '';
+    document.getElementById('modal-delete').classList.add('hidden');
+  }
+
+  checkModalConflict();
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.add('hidden');
+  document.getElementById('modal').classList.remove('flex');
+  state.editingId = null;
+}
+
+function checkModalConflict() {
+  const date = document.getElementById('modal-date').value;
+  const member = document.getElementById('modal-member').value;
+  const replacement = document.getElementById('modal-replacement').value;
+  const conflictBox = document.getElementById('modal-conflict');
+  const warnings = [];
+
+  // Holiday warning
+  if (HOLIDAYS_2026[date]) {
+    warnings.push(`📅 ${date} es feriado nacional (${HOLIDAYS_2026[date]}).`);
+  }
+
+  // Other people already off that day
+  const others = state.events.filter(e => e.date === date && e.memberId !== member && e.id !== state.editingId);
+  if (others.length > 0) {
+    const names = others.map(e => getMember(e.memberId).name.split(' ')[0]).join(', ');
+    warnings.push(`⚠️ También ausente(s) ese día: ${names}.`);
+  }
+
+  // Replacement is also out
+  if (replacement) {
+    const replOut = state.events.find(e => e.date === date && e.memberId === replacement && e.id !== state.editingId);
+    if (replOut) {
+      warnings.push(`❌ El reemplazo asignado también está ausente ese día.`);
+    }
+    if (replacement === member) {
+      warnings.push(`❌ La persona no puede ser su propio reemplazo.`);
+    }
+  }
+
+  // Same person already has event that day
+  const dup = state.events.find(e => e.date === date && e.memberId === member && e.id !== state.editingId);
+  if (dup) {
+    warnings.push(`ℹ️ Esta persona ya tiene una ausencia registrada ese día.`);
+  }
+
+  if (warnings.length > 0) {
+    conflictBox.innerHTML = warnings.map(w => `<div>${w}</div>`).join('');
+    conflictBox.classList.remove('hidden');
+  } else {
+    conflictBox.classList.add('hidden');
+  }
+}
+
+async function saveEvent() {
+  const date = document.getElementById('modal-date').value;
+  const memberId = document.getElementById('modal-member').value;
+  const type = document.getElementById('modal-type').value;
+  const replacementId = document.getElementById('modal-replacement').value || null;
+  const notes = document.getElementById('modal-notes').value.trim();
+
+  if (!date || !memberId) {
+    showToast('Completa fecha y persona', true);
+    return;
+  }
+
+  if (replacementId === memberId) {
+    showToast('La persona no puede ser su propio reemplazo', true);
+    return;
+  }
+
+  if (state.editingId) {
+    const ev = state.events.find(e => e.id === state.editingId);
+    Object.assign(ev, { date, memberId, type, replacementId, notes });
+    showToast('✓ Ausencia actualizada');
+  } else {
+    state.events.push({ id: uid(), date, memberId, type, replacementId, notes });
+    showToast('✓ Ausencia registrada');
+  }
+
+  await saveState();
+  closeModal();
+  // Jump to month of the event
+  const d = parseDate(date);
+  if (d.getFullYear() === YEAR) state.currentMonth = d.getMonth();
+  renderAll();
+}
+
+async function deleteEvent() {
+  if (!state.editingId) return;
+  if (!confirm('¿Eliminar esta ausencia?')) return;
+  state.events = state.events.filter(e => e.id !== state.editingId);
+  await saveState();
+  closeModal();
+  renderAll();
+  showToast('✓ Ausencia eliminada');
+}
+
+// ============== EXPORT / IMPORT ==============
+function exportData() {
+  const data = JSON.stringify({ year: YEAR, exported: new Date().toISOString(), events: state.events }, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `respaldo-permisos-${YEAR}-${fmtDate(new Date())}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('✓ Respaldo descargado');
+}
+
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.events || !Array.isArray(data.events)) throw new Error('Formato inválido');
+      if (!confirm(`Se importarán ${data.events.length} registros, reemplazando los actuales. ¿Continuar?`)) return;
+      state.events = data.events;
+      await saveState();
+      renderAll();
+      showToast('✓ Respaldo importado');
+    } catch (err) {
+      showToast('Error al importar: ' + err.message, true);
+    }
+  };
+  reader.readAsText(file);
+}
+
+async function resetData() {
+  if (!confirm('¿Borrar TODOS los registros? Esta acción no se puede deshacer.')) return;
+  if (!confirm('Confirma una vez más: se eliminarán todas las ausencias registradas.')) return;
+  state.events = [];
+  await saveState();
+  renderAll();
+  showToast('✓ Registros borrados');
+}
+
+// ============== EVENT LISTENERS ==============
+document.getElementById('prev-month').addEventListener('click', () => {
+  state.currentMonth = Math.max(0, state.currentMonth - 1);
+  renderCalendar();
+});
+document.getElementById('next-month').addEventListener('click', () => {
+  state.currentMonth = Math.min(11, state.currentMonth + 1);
+  renderCalendar();
+});
+document.getElementById('today-btn').addEventListener('click', () => {
+  const now = new Date();
+  state.currentMonth = (now.getFullYear() === YEAR) ? now.getMonth() : 0;
+  renderCalendar();
+});
+document.getElementById('print-cal-btn').addEventListener('click', () => {
+  document.body.classList.remove('print-list-mode');
+  window.print();
+});
+document.getElementById('print-list-btn').addEventListener('click', () => {
+  renderPrintList();
+  document.body.classList.add('print-list-mode');
+  // Esperar a que el DOM aplique la clase antes de imprimir
+  setTimeout(() => {
+    window.print();
+    // Quitar la clase después de imprimir
+    setTimeout(() => document.body.classList.remove('print-list-mode'), 500);
+  }, 50);
+});
+document.getElementById('filter-clear').addEventListener('click', () => {
+  state.filter = null;
+  renderTeamList();
+  renderCalendar();
+});
+
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+document.getElementById('modal-save').addEventListener('click', saveEvent);
+document.getElementById('modal-delete').addEventListener('click', deleteEvent);
+['modal-date','modal-member','modal-replacement'].forEach(id => {
+  document.getElementById(id).addEventListener('change', checkModalConflict);
+});
+document.getElementById('modal').addEventListener('click', e => {
+  if (e.target.id === 'modal') closeModal();
+});
+
+document.getElementById('export-btn').addEventListener('click', exportData);
+document.getElementById('import-btn').addEventListener('click', () => document.getElementById('import-file').click());
+document.getElementById('import-file').addEventListener('change', e => {
+  if (e.target.files[0]) importData(e.target.files[0]);
+  e.target.value = '';
+});
+document.getElementById('reset-btn').addEventListener('click', resetData);
+
+// ============== INIT ==============
+(async () => {
+  await loadState();
+  renderAll();
+})();
+</script>
+
+</body>
+</html>

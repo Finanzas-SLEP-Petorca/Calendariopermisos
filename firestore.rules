@@ -1,0 +1,41 @@
+// Reglas de seguridad Firestore — App de Permisos SLEP Petorca
+// Para desplegar: Firebase Console → Firestore Database → Reglas → pegar este contenido → Publicar
+// Para agregar/quitar correos: editar la lista en isAllowed() Y en ALLOWED_EMAILS en index.html
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAllowed() {
+      return request.auth != null && request.auth.token.email in [
+        "wilson.rojas@sleppetorca.gob.cl",
+        "juan.bustamante@sleppetorca.gob.cl",
+        "benedicto.fessia@sleppetorca.gob.cl",
+        "sebastian.olguin@sleppetorca.gob.cl",
+        "fernando.saavedra@sleppetorca.gob.cl",
+        "yessenia.vilches@sleppetorca.gob.cl",
+        "catalina.brito@sleppetorca.gob.cl",
+        "wilson.rojasabarca@gmail.com"
+      ];
+    }
+
+    function validEventData() {
+      return request.resource.data.keys().hasAll(['date', 'memberId', 'type'])
+        && request.resource.data.date is string
+        && request.resource.data.memberId is string
+        && request.resource.data.type is string
+        && request.resource.data.type in ['feriado','permiso','licencia','compensacion','otro'];
+    }
+
+    match /events/{eventId} {
+      allow read:   if isAllowed();
+      allow create: if isAllowed() && validEventData();
+      allow update: if isAllowed();
+      allow delete: if isAllowed();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
